@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zenith PDF Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        /* Base Body - Pure black, no scrollbar space */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000; 
+            overflow-x: hidden; 
+            font-family: sans-serif;
+        }
+
+        /* Beautiful Custom Dark Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #000; }
+        ::-webkit-scrollbar-thumb { background: #333; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        
+        /* 
+         * ULTRA-THIN STEALTH HEADER 
+         * Height is squeezed to the absolute minimum (26px)
+         */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 26px; /* Razor thin */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: rgba(10, 10, 10, 0.9); /* Dark and slightly transparent */
+            backdrop-filter: blur(5px);
+            border-bottom: 1px solid #222;
+            z-index: 1000;
+        }
+
+        /* Tiny inputs to fit inside the 26px header */
+        select, input[type="file"] {
+            height: 18px; /* Extremely short */
+            padding: 0 4px;
+            font-size: 10px; /* Tiny text */
+            border-radius: 2px;
+            border: 1px solid #444;
+            background: #111;
+            color: #ddd;
+            cursor: pointer;
+            outline: none;
+        }
+
+        /* Make the "Choose File" button itself tiny */
+        input[type="file"]::file-selector-button {
+            height: 16px;
+            padding: 0 6px;
+            margin-right: 4px;
+            font-size: 10px;
+            background: #2a2a2a;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        
+        input[type="file"]::file-selector-button:hover, select:hover {
+            background: #00a8ff;
+            color: #000;
+        }
+
+        #status {
+            font-size: 10px;
+            color: #00a8ff;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        
+        /* Layout Styles - Pushed down just enough to not hide under the header */
+        #pdf-container {
+            display: flex;
+            flex-direction: column;
+            width: 100vw; 
+            padding-top: 26px; /* Matches the exact height of the header */
+        }
+        
+        #pdf-container.grid-layout {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr); 
+        }
+
+        /* Seamless slides - no margins, no gaps */
+        .slide-container {
+            position: relative; 
+            width: 100vw;
+            margin: 0;
+            padding: 0;
+            display: block; /* Removes any flex gaps */
+            animation: fadeIn 0.8s ease-out; 
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* The rendered PDF image takes up 100% of the screen width */
+        img.pdf-page-image {
+            width: 100vw;
+            height: auto;
+            display: block; /* Removes weird spacing under images */
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Tiny Floating Label */
+        .slide-label {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            color: rgba(255, 255, 255, 0.6);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            pointer-events: none; 
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ultra-Thin Header -->
+    <div class="header">
+        <input type="file" id="file-input" multiple accept="application/pdf" />
+        
+        <select id="layout-select">
+            <option value="column">1 Column</option>
+            <option value="grid">2 Columns</option>
+        </select>
+        
+        <select id="rotate-select">
+            <option value="none">Original</option>
+            <option value="landscape">Force Landscape</option>
+            <option value="portrait">Force Portrait</option>
+        </select>
+
+        <span id="status">Waiting for PDFs...</span>
+    </div>
+
+    <!-- Container -->
+    <div id="pdf-container" class="column-layout"></div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const fileInput = document.getElementById('file-input');
+        const container = document.getElementById('pdf-container');
+        const statusText = document.getElementById('status');
+        const layoutSelect = document.getElementById('layout-select');
+        const rotateSelect = document.getElementById('rotate-select');
+
+        layoutSelect.addEventListener('change', (e) => {
+            container.className = e.target.value === 'grid' ? 'grid-layout' : 'column-layout';
+        });
+
+        fileInput.addEventListener('change', async (e) => {
+            container.innerHTML = ''; 
+            const files = Array.from(e.target.files);
+            
+            if (files.length === 0) return;
+
+            // Sort files by name so they are in order
+            files.sort((a, b) => a.name.localeCompare(b.name));
+            
+            statusText.innerText = `Processing 0 / ${files.length}...`;
+            statusText.style.color = "#00a8ff";
+
+            const rotatePref = rotateSelect.value;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                let pdf;
+                
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                    
+                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                        statusText.innerText = `Loading ${i + 1}/${files.length} (Pg ${pageNum}/${pdf.numPages})...`;
+                        
+                        const page = await pdf.getPage(pageNum);
+                        
+                        let viewport = page.getViewport({ scale: 1.5 });
+                        const currentRotation = page.rotate || 0;
+                        const isPortrait = viewport.height > viewport.width;
+
+                        if (rotatePref === 'landscape' && isPortrait) {
+                            viewport = page.getViewport({ scale: 1.5, rotation: currentRotation + 90 });
+                        } else if (rotatePref === 'portrait' && !isPortrait) {
+                            viewport = page.getViewport({ scale: 1.5, rotation: currentRotation + 90 });
+                        }
+
+                        // Render Canvas
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+                        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+                        // Memory Save: Convert to Image
+                        const img = document.createElement('img');
+                        img.className = 'pdf-page-image';
+                        img.src = canvas.toDataURL('image/jpeg', 0.85);
+
+                        // Memory Dump: Destroy Canvas
+                        canvas.width = 0;
+                        canvas.height = 0;
+                        page.cleanup();
+
+                        // Add to screen
+                        const slideWrapper = document.createElement('div');
+                        slideWrapper.className = 'slide-container';
+                        
+                        const label = document.createElement('div');
+                        label.className = 'slide-label';
+                        label.innerText = `${file.name} - ${pageNum}`;
+
+                        slideWrapper.appendChild(img);
+                        slideWrapper.appendChild(label); 
+                        container.appendChild(slideWrapper);
+
+                        // Pause to prevent freezing
+                        await new Promise(resolve => setTimeout(resolve, 15));
+                    }
+                    
+                    pdf.destroy();
+
+                } catch (error) {
+                    console.error(`Error processing ${file.name}:`, error);
+                }
+            }
+
+            statusText.innerText = `Done! Loaded ${files.length} PDFs.`;
+            statusText.style.color = "#00e676"; 
+        });
+    </script>
+</body>
+</html>
